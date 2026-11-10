@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://propfirm-bit.github.io/cost-calc/sitemap.xml
