@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>プロップ コンシステンシー計算機 | 最良日の比率をチェック・分散に必要な日数を算出</title>
+<meta name="description" content="日次損益を貼り付けるだけで、最良日の利益がコンシステンシールール(一貫性ルール)の上限内かを判定。評価中とpayout申請時の2基準に対応し、分散に必要な追加利益と日数を算出します。">
+<style>
+:root{
+  --bg:#0E1621; --panel:#16212E; --panel2:#1D2A3A; --line:#27374B;
+  --text:#E6EDF5; --dim:#A9B9CE; --amber:#F5A623; --amber-dim:rgba(245,166,35,.14);
+  --green:#3DD68C; --green-dim:rgba(61,214,140,.12);
+  --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:'Zen Kaku Gothic New',system-ui,-apple-system,'Hiragino Kaku Gothic ProN',sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15px;line-height:1.6}
+.wrap{max-width:960px;margin:0 auto;padding:28px 16px 64px}
+header .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.18em;color:var(--amber);text-transform:uppercase}
+header h1{font-size:26px;font-weight:700;letter-spacing:.02em;margin:6px 0 4px}
+header .sub{color:var(--dim);font-size:13.5px;max-width:44em}
+.stamp{display:inline-block;font-family:var(--mono);font-size:11px;color:var(--dim);border:1px solid var(--line);border-radius:3px;padding:2px 8px;margin-top:10px}
+.controls{display:grid;grid-template-columns:2fr 1fr 1fr;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;margin:22px 0 18px}
+.field label{display:block;font-size:12px;color:var(--dim);margin-bottom:5px}
+.field select,.field input{width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:5px;color:var(--text);font-family:var(--mono);font-size:15px;padding:9px 10px}
+.field select:focus,.field input:focus{outline:2px solid var(--amber);outline-offset:1px}
+textarea{width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:5px;color:var(--text);font-family:var(--mono);font-size:14px;padding:12px;min-height:150px;resize:vertical}
+textarea:focus{outline:2px solid var(--amber);outline-offset:1px}
+.cards{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:18px 0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px}
+.card h2{font-size:13px;color:var(--dim);font-weight:600;margin-bottom:8px}
+.verdict{font-size:22px;font-weight:700;letter-spacing:.02em}
+.verdict.ok{color:var(--green)}
+.verdict.ng{color:var(--amber)}
+.card .detail{font-size:13px;color:var(--dim);margin-top:8px}
+.card .detail strong{color:var(--text)}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:6px 0 14px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+.stat .k{font-size:11px;color:var(--dim);font-family:var(--mono);letter-spacing:.08em}
+.stat .v{font-family:var(--mono);font-size:20px;font-variant-numeric:tabular-nums;margin-top:2px}
+.bars{margin:4px 0 8px}
+.barrow{display:flex;align-items:center;gap:8px;margin:3px 0}
+.barrow .bl{font-family:var(--mono);font-size:11px;color:var(--dim);width:3.5em;text-align:right}
+.barrow .track{flex:1;background:var(--panel2);border-radius:3px;height:14px;position:relative;overflow:hidden}
+.barrow .fill{position:absolute;left:0;top:0;bottom:0;background:#3E5470;border-radius:3px}
+.barrow.best .fill{background:var(--amber)}
+.barrow.neg .fill{background:#5A3A4A}
+.barrow .bv{font-family:var(--mono);font-size:12px;width:5.5em;font-variant-numeric:tabular-nums;text-align:right}
+.notes{margin-top:18px;font-size:12px;color:var(--dim);border-top:1px solid var(--line);padding-top:12px}
+.notes li{margin-left:1.2em;margin-top:4px}
+footer{margin-top:28px;font-size:11.5px;color:var(--dim);text-align:center}
+.hidden{display:none}
+@media (max-width:720px){
+  .controls{grid-template-columns:1fr}
+  .cards{grid-template-columns:1fr}
+  .stats{grid-template-columns:1fr 1fr}
+}
+@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Futures Prop · Consistency</div>
+    <h1>コンシステンシー計算機</h1>
+    <p class="sub">日次損益を1行ずつ貼り付けると、最良日の利益が「一貫性ルール」の上限内かを判定します。評価(チャレンジ)中とpayout申請時は基準が別 — 両方を同時にチェックします。</p>
+    <span class="stamp">ファーム別プリセット: 2026-10-23調査データ(8社) · ルール%は必ず申込前に公式で再確認してください</span>
+  </header>
+
+  <section class="controls" aria-label="入力">
+    <div class="field" style="grid-column:1/-1">
+      <label for="daily">日次損益(1行 = 1日・例: 1250 / -400 / $1,250)</label>
+      <textarea id="daily" spellcheck="false" placeholder="1250&#10;800&#10;-300&#10;1400&#10;600"></textarea>
+    </div>
+    <div class="field">
+      <label for="firm">ファームプリセット(評価中ルール%を自動入力)</label>
+      <select id="firm"><option value="">カスタム/未選択</option></select>
+    </div>
+    <div class="field">
+      <label for="evalpct">評価中ルール(最良日 ≤ 総利益の%)</label>
+      <input id="evalpct" type="number" min="1" max="100" step="1" value="55">
+    </div>
+    <div class="field">
+      <label for="paypct">payout申請時ルール(%)</label>
+      <input id="paypct" type="number" min="1" max="100" step="1" value="40">
+    </div>
+  </section>
+
+  <div id="results" class="hidden">
+    <div class="stats">
+      <div class="stat"><div class="k">TOTAL 合計利益</div><div class="v" id="s-total">-</div></div>
+      <div class="stat"><div class="k">BEST DAY 最良日</div><div class="v" id="s-best">-</div></div>
+      <div class="stat"><div class="k">RATIO 最良日比率</div><div class="v" id="s-ratio">-</div></div>
+    </div>
+
+    <div class="cards">
+      <div class="card">
+        <h2>評価(チャレンジ)中の判定</h2>
+        <div class="verdict" id="v-eval">-</div>
+        <div class="detail" id="d-eval"></div>
+      </div>
+      <div class="card">
+        <h2>payout申請時の判定</h2>
+        <div class="verdict" id="v-pay">-</div>
+        <div class="detail" id="d-pay"></div>
+      </div>
+    </div>
+
+    <div class="field" style="margin-bottom:6px"><label>日次明細(最良日を強調)</label></div>
+    <div class="bars" id="bars"></div>
+  </div>
+
+  <ul class="notes">
+    <li>コンシステンシールールは「利益のうち最良日が占める割合」の上限。評価中に超えると<b>目標額が引き上げられる</b>仕様のファームが多く(Topstep等)、payout申請時は別基準(多くは40%以下)です。</li>
+    <li>ファームプリセットの%は2026-10-23時点の調査データに基づきます。改定が頻繁なため、申込・申請前に必ず公式サイトで再確認してください。</li>
+    <li>payout申請時の%はファームにより異なります。既定値40%は一般的な基準ですが、ご利用のファームの規約を確認してください。</li>
+  </ul>
+
+  <footer>計算結果は目安です。最終判断は必ず利用中ファームの公式ルール・ダッシュボードで行ってください。</footer>
+</div>
+
+<script id="presets-src" type="application/json">
+{"Lucid Trading": {"evalPct": 40}, "Tradeify": {"evalPct": 20}, "Earn2Trade": {"evalPct": 30}}
+</script>
+<script>
+const PRESETS = JSON.parse(document.getElementById('presets-src').textContent);
+
+// ===== 計算コア(単一真実: テストはこの analyze を抽出して実行) =====
+function analyze(days, evalPct, payPct){
+  const total = days.reduce((a, b) => a + b, 0);
+  const best = days.length ? Math.max(...days) : 0;
+  const EPS = 0.01;
+  const r = { total, best, evalPct, payPct };
+  r.ratio = total > 0 ? best / total * 100 : null;
+  r.evalAllowed = total > 0 ? total * evalPct / 100 : null;
+  r.evalOk = total > 0 ? best <= r.evalAllowed + EPS : null;
+  r.payAllowed = total > 0 ? total * payPct / 100 : null;
+  r.payOk = total > 0 ? best <= r.payAllowed + EPS : null;
+  // 最良日比率を%p内に収めるための追加利益 = best/p - total
+  r.extraEval = (total > 0 && !r.evalOk) ? Math.max(0, best / (evalPct / 100) - total) : 0;
+  r.extraPay = (total > 0 && !r.payOk) ? Math.max(0, best / (payPct / 100) - total) : 0;
+  const pos = days.filter(d => d > 0);
+  r.avgPos = pos.length ? pos.reduce((a, b) => a + b, 0) / pos.length : 0;
+  r.daysEval = (r.extraEval > 0 && r.avgPos > 0) ? Math.ceil(r.extraEval / r.avgPos) : 0;
+  r.daysPay = (r.extraPay > 0 && r.avgPos > 0) ? Math.ceil(r.extraPay / r.avgPos) : 0;
+  r.valid = total > 0;
+  return r;
+}
+
+function parseDaily(text){
+  return text.split(/\r?\n|,/).map(s => s.trim()).filter(Boolean)
+    .map(s => parseFloat(s.replace(/[$,\s]/g, '')))
+    .filter(v => Number.isFinite(v));
+}
+
+const $ = s => document.querySelector(s);
+const fmt = v => (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString('en-US');
+
+// プリセット選択肢(社名ソート)
+$('#firm').innerHTML += Object.keys(PRESETS).sort().map(f =>
+  `<option value="${f}">${f}(${PRESETS[f].evalPct}%)</option>`).join('');
+
+$('#firm').addEventListener('change', e => {
+  const p = PRESETS[e.target.value];
+  if (p) $('#evalpct').value = p.evalPct;
+  run();
+});
+['#daily', '#evalpct', '#paypct'].forEach(s => $(s).addEventListener('input', run));
+
+function run(){
+  const days = parseDaily($('#daily').value);
+  if (!days.length){ $('#results').classList.add('hidden'); return; }
+  const evalPct = Math.min(100, Math.max(1, parseFloat($('#evalpct').value) || 55));
+  const payPct = Math.min(100, Math.max(1, parseFloat($('#paypct').value) || 40));
+  const r = analyze(days, evalPct, payPct);
+  $('#results').classList.remove('hidden');
+
+  $('#s-total').textContent = fmt(r.total);
+  $('#s-best').textContent = fmt(r.best);
+  $('#s-ratio').textContent = r.valid ? r.ratio.toFixed(1) + '%' : '-';
+
+  if (!r.valid){
+    $('#v-eval').textContent = '判定不可'; $('#v-eval').className = 'verdict ng';
+    $('#d-eval').innerHTML = '合計利益がプラスになると判定できます。';
+    $('#v-pay').textContent = '判定不可'; $('#v-pay').className = 'verdict ng';
+    $('#d-pay').innerHTML = '合計利益がプラスになると判定できます。';
+  } else {
+    const ev = $('#v-eval'); const de = $('#d-eval');
+    if (r.evalOk){ ev.textContent = 'OK 上限内'; ev.className = 'verdict ok';
+      de.innerHTML = `最良日 ${fmt(r.best)} ≤ 上限 <strong>${fmt(r.evalAllowed)}</strong>(総利益の${evalPct}%)`;
+    } else { ev.textContent = 'NG 上限超過'; ev.className = 'verdict ng';
+      de.innerHTML = `上限 <strong>${fmt(r.evalAllowed)}</strong> に対し最良日 <strong>${fmt(r.best)}</strong>。総利益が <strong>${fmt(r.extraEval)}</strong> 増えれば比率が${evalPct}%内に戻ります` + (r.daysEval ? `(プラス日の平均ペースで <strong>約${r.daysEval}日</strong>)` : '');
+    }
+    const pv = $('#v-pay'); const dp = $('#d-pay');
+    if (r.payOk){ pv.textContent = 'OK 上限内'; pv.className = 'verdict ok';
+      dp.innerHTML = `最良日 ${fmt(r.best)} ≤ 上限 <strong>${fmt(r.payAllowed)}</strong>(総利益の${payPct}%)`;
+    } else { pv.textContent = 'NG 上限超過'; pv.className = 'verdict ng';
+      dp.innerHTML = `上限 <strong>${fmt(r.payAllowed)}</strong> に対し最良日 <strong>${fmt(r.best)}</strong>。総利益が <strong>${fmt(r.extraPay)}</strong> 増えれば比率が${payPct}%内に戻ります` + (r.daysPay ? `(プラス日の平均ペースで <strong>約${r.daysPay}日</strong>)` : '');
+    }
+  }
+
+  // 日次バー
+  const maxAbs = Math.max(...days.map(d => Math.abs(d)), 1);
+  const bi = days.indexOf(Math.max(...days));
+  $('#bars').innerHTML = days.slice(0, 30).map((d, i) =>
+    `<div class="barrow ${d < 0 ? 'neg' : ''} ${i === bi ? 'best' : ''}">
+      <span class="bl">D${i + 1}</span>
+      <span class="track"><span class="fill" style="width:${Math.abs(d) / maxAbs * 100}%"></span></span>
+      <span class="bv">${fmt(d)}</span>
+    </div>`).join('') + (days.length > 30 ? `<div class="notes" style="border:0;padding:0">…以降${days.length - 30}日は省略表示(判定には全日数を使用)</div>` : '');
+}
+run();
+</script>
+</body>
+</html>
