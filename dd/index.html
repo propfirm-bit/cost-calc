@@ -49,6 +49,13 @@ footer{margin-top:28px;font-size:11.5px;color:var(--dim);text-align:center}
 }
 @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
 </style>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-YF8GPQ0PRS"></script>
+<script>
+window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('js', new Date());
+gtag('config', 'G-YF8GPQ0PRS');
+</script>
 </head>
 <body>
 <div class="wrap">
@@ -229,6 +236,12 @@ function run(){
   }
 }
 run();
+</script>
+<script>
+document.addEventListener('click', function(e){
+  var a = e.target.closest('a');
+  if (a) gtag('event', 'outbound_click', { tool: 'dd', url: a.href });
+});
 </script>
 </body>
 </html>
