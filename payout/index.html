@@ -129,7 +129,7 @@ const DATA = JSON.parse(document.getElementById('data-src').textContent);
 // ===== 計算コア(単一真実: テストはこの payoutCalc を抽出して実行) =====
 function payoutCalc(profit, split, maxPer){
   const take = profit * split / 100;
-  const cycles = (maxPer != null && maxPer > 0) ? Math.ceil(take / maxPer) : 1;
+  const cycles = (maxPer != null && maxPer > 0) ? (take > 0 ? Math.ceil(take / maxPer) : 1) : 1;
   return { take, cycles, capped: cycles > 1 };
 }
 
